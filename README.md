@@ -1,2 +1,2 @@
-# gengo
+# nengo
 wareki converter
