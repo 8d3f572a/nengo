@@ -1,6 +1,6 @@
 [package]
 name = "nengo"
-version = "0.2.0-rc.1"
+version = "0.2.0"
 edition = "2024"
 description = "Japanese wareki (和暦) date string parser"
 license = "Apache-2.0"
