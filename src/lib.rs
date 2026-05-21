@@ -1,5 +1,22 @@
+//! # nengo
+//!
+//! 和暦文字列をパースするクレートです。
+//!
+//! 明治・大正・昭和・平成・令和に対応しており、漢数字・全角数字・半角数字の混在も扱えます。
+//!
+//! ## 使い方
+//!
+//! ```rust
+//! use nengo::parse_wareki_date;
+//!
+//! let date = parse_wareki_date("令和六年五月二十四日").unwrap();
+//! assert_eq!(date.to_string(), "2024-05-24");
+//! ```
+
 use once_cell::sync::Lazy;
 use regex::Regex;
+
+// Internal
 
 /// 全角ASCII数字を半角に変換する関数（'０'→'0' など）
 fn to_halfwidth(c: char) -> char {
@@ -10,7 +27,45 @@ fn to_halfwidth(c: char) -> char {
     }
 }
 
-/// 漢数字・アラビア数字（半角・全角）を u32 にキャストします（1〜999までの範囲内のみ）
+/// 和暦を年号にキャストする内部関数
+fn parse_wareki_inner(raw: &str) -> Option<String> {
+    let caps = DATE_RE.captures(raw)?;
+    let offset: u32 = match &caps[1] {
+        "令和" => 2018,
+        "平成" => 1988,
+        "昭和" => 1925,
+        "大正" => 1911,
+        "明治" => 1867,
+        _ => return None,
+    };
+    let y = offset + kanji_to_num(&caps[2])?;
+    let m = kanji_to_num(&caps[3])?;
+    let d = kanji_to_num(&caps[4])?;
+    Some(format!("{:04}{:02}{:02}", y, m, d))
+}
+
+/// 明治〜令和までの正規表現
+static DATE_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"^(明治|大正|昭和|平成|令和)([0-9０-９一二三四五六七八九十百元]+?)年([0-9０-９一二三四五六七八九十百元]+?)月([0-9０-９一二三四五六七八九十百元]+?)日$",
+    )
+    .unwrap()
+});
+
+/// 漢数字・アラビア数字（半角・全角）を `u32` に変換します。
+///
+/// `元` は `1` として扱います。対応範囲は 1〜999 です。
+///
+/// # Examples
+///
+/// ```rust
+/// use nengo::kanji_to_num;
+///
+/// assert_eq!(kanji_to_num("元"), Some(1));
+/// assert_eq!(kanji_to_num("二十四"), Some(24));
+/// assert_eq!(kanji_to_num("２４"), Some(24));
+/// assert_eq!(kanji_to_num("abc"), None);
+/// ```
 pub fn kanji_to_num(kanji: &str) -> Option<u32> {
     if kanji == "元" {
         return Some(1);
@@ -50,32 +105,66 @@ pub fn kanji_to_num(kanji: &str) -> Option<u32> {
     Some(total + temp)
 }
 
-static DATE_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(
-        r"^(明治|大正|昭和|平成|令和)([0-9０-９一二三四五六七八九十百元]+?)年([0-9０-９一二三四五六七八九十百元]+?)月([0-9０-９一二三四五六七八九十百元]+?)日$",
-    )
-    .unwrap()
-});
+/// 和暦文字列を [`chrono::NaiveDate`] に変換します。
+/// パース失敗・不正な日付（2月30日など）の場合は `None` を返します。
+///
+/// 対応元号：明治・大正・昭和・平成・令和
+///
+/// 年月日は以下の形式が混在していても解釈できます：
+/// - 漢数字（`二十四`）
+/// - 半角アラビア数字（`24`）
+/// - 全角アラビア数字（`２４`）
+/// - 元年表記（`元`）
+///
+/// # Examples
+///
+/// ```rust
+/// use nengo::parse_wareki_date;
+///
+/// // 漢数字
+/// assert!(parse_wareki_date("令和六年五月二十四日").is_some());
+///
+/// // 元年
+/// assert!(parse_wareki_date("令和元年五月一日").is_some());
+///
+/// // 全角数字
+/// assert!(parse_wareki_date("令和６年５月２４日").is_some());
+///
+/// // 不正な日付はNone
+/// assert!(parse_wareki_date("令和六年二月三十日").is_none());
+///
+/// // パース失敗もNone
+/// assert!(parse_wareki_date("20240524").is_none());
+/// ```
+#[cfg(feature = "chrono")]
+pub fn parse_wareki_date(raw: &str) -> Option<chrono::NaiveDate> {
+    let s = parse_wareki_inner(raw)?;
+    chrono::NaiveDate::parse_from_str(&s, "%Y%m%d").ok()
+}
 
-/// 和暦文字列を YYYYMMDD 形式の String に変換する
-/// パース失敗時は None を返す
+/// 和暦文字列を `YYYYMMDD` 形式の [`String`] に変換します。
+/// パース失敗時は `None` を返します。
+///
+/// # Examples
+///
+/// ```rust
+/// #[allow(deprecated)]
+/// use nengo::parse_wareki;
+///
+/// assert_eq!(parse_wareki("令和六年五月二十四日"), Some("20240524".into()));
+/// assert_eq!(parse_wareki("令和元年五月一日"), Some("20190501".into()));
+/// ```
+///
+/// # Deprecation
+///
+/// [`parse_wareki_date`] を使ってください。不正な日付（2月30日など）を弾けます。
+#[deprecated(since = "0.2.0", note = "Use `parse_wareki_date` instead")]
 pub fn parse_wareki(raw: &str) -> Option<String> {
-    let caps = DATE_RE.captures(raw)?;
-    let offset: u32 = match &caps[1] {
-        "令和" => 2018,
-        "平成" => 1988,
-        "昭和" => 1925,
-        "大正" => 1911,
-        "明治" => 1867,
-        _ => return None,
-    };
-    let y = offset + kanji_to_num(&caps[2])?;
-    let m = kanji_to_num(&caps[3])?;
-    let d = kanji_to_num(&caps[4])?;
-    Some(format!("{:04}{:02}{:02}", y, m, d))
+    parse_wareki_inner(raw)
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
